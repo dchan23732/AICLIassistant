@@ -6,7 +6,7 @@ umask 022
 HOST="${HOST_ORCH:-192.168.122.1}"
 PORT="${HOST_PORT:-8081}"
 
-# Ensure /usr/local/bin exists (UserLAnd usually has this)
+# Ensure /usr/local/bin exists (FreeBSD standard path)
 mkdir -p /usr/local/bin
 
 ###############################################################################
@@ -138,7 +138,7 @@ EOF
 chmod 0755 /usr/local/bin/agent-loop
 
 ###############################################################################
-# Optional systemd unit (skipped on UserLAnd / no systemd)
+# FreeBSD rc.d service (standard FreeBSD init system)
 ###############################################################################
 # FreeBSD rc.d service
 if command -v sysrc >/dev/null 2>&1; then
@@ -167,4 +167,8 @@ else
   echo "sysrc not found; skipping rc.d install. Run 'agent-loop' manually when needed."
 fi
 
+echo "FreeBSD orchestrator agent installed successfully!"
 echo "Installed /usr/local/bin/ask and /usr/local/bin/agent-loop"
+echo "Service can be managed with: service agent_loop start/stop/status"
+echo "Enable on boot with: sysrc agent_loop_enable=YES"
+
