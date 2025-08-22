@@ -19,6 +19,40 @@ set -eu
 HOST="${HOST_ORCH:-192.168.122.1}"
 PORT="${HOST_PORT:-8081}"
 
+# Minimal URL encoder (encodes all non-safe ASCII to %XX)
+urlencode() {
+  s=$1
+  out=""
+  i=1
+  len=${#s}
+  while [ $i -le $len ]; do
+    c=$(printf %s "$s" | dd bs=1 count=1 skip=$((i-1)) 2>/dev/null || true)
+    case "$c" in
+      [A-Za-z0-9._~-]) out="${out}${c}" ;;
+      ' ') out="${out}%20" ;;
+      *) out="${out}%$(printf %s "$c" | od -An -tx1 | tr -d ' \n')" ;;
+    esac
+    i=$((i+1))
+  done
+  printf %s "$out"
+}
+
+# HTTP client using nc (works on base FreeBSD)
+http_get() {
+  path="$1"
+  req="GET ${path} HTTP/1.1\r\nHost: ${HOST}\r\nConnection: close\r\n\r\n"
+  resp=$(printf %s "$req" | nc -w 10 "$HOST" "$PORT" || true)
+  printf %s "$resp" | awk 'BEGIN{h=1} h&&/^\r?$/{h=0;next} !h{print}'
+}
+
+http_post_form() {
+  path="$1"; body="$2"
+  clen=${#body}
+  req_header="POST ${path} HTTP/1.1\r\nHost: ${HOST}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${clen}\r\nConnection: close\r\n\r\n"
+  resp=$( (printf %s "$req_header"; printf %s "$body") | nc -w 15 "$HOST" "$PORT" || true)
+  printf %s "$resp" | awk 'BEGIN{h=1} h&&/^\r?$/{h=0;next} !h{print}'
+}
+
 if [ $# -eq 0 ]; then
   echo 'Usage: ask "what you want to do"'
   echo '       ask code --lang python --out ~/Documents/hello.py -- "Print Hello World"'
@@ -68,13 +102,8 @@ if [ "$1" = "code" ]; then
   mkdir -p "$OUT_DIR"
 
   # Call orchestrator /code; server writes the file and returns a JSON summary
-  URL="http://$HOST:$PORT/code"
-  # We URL-encode each field cleanly; NO stray ellipses!
-  RESP="$(curl -sG \
-    --data-urlencode "path=$OUT_ABS" \
-    --data-urlencode "q=$DESC" \
-    --data-urlencode "lang=$LANG" \
-    "$URL" || true)"
+  q_path="/code?path=$(urlencode "$OUT_ABS")&q=$(urlencode "$DESC")&lang=$(urlencode "$LANG")"
+  RESP="$(http_get "$q_path" || true)"
 
   if [ -z "$RESP" ]; then
     echo "No response from code service" >&2
@@ -86,8 +115,8 @@ fi
 
 # Default path: prefer autonomous action on FreeBSD
 ARGS="$*"
-URL="http://$HOST:$PORT/act"
-RESP="$(curl -sG --data-urlencode "q=$ARGS" "$URL" || true)"
+q_path="/act?q=$(urlencode "$ARGS")"
+RESP="$(http_get "$q_path" || true)"
 echo "$RESP"
 EOF
 chmod 0755 /usr/local/bin/ask
@@ -102,16 +131,32 @@ set -eu
 HOST="${HOST_ORCH:-192.168.122.1}"
 PORT="${HOST_PORT:-8081}"
 
+# HTTP helpers using nc
+http_get() {
+  path="$1"
+  req="GET ${path} HTTP/1.1\r\nHost: ${HOST}\r\nConnection: close\r\n\r\n"
+  resp=$(printf %s "$req" | nc -w 10 "$HOST" "$PORT" || true)
+  printf %s "$resp" | awk 'BEGIN{h=1} h&&/^\r?$/{h=0;next} !h{print}'
+}
+
+http_post_form() {
+  path="$1"; body="$2"
+  clen=${#body}
+  req_header="POST ${path} HTTP/1.1\r\nHost: ${HOST}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: ${clen}\r\nConnection: close\r\n\r\n"
+  resp=$( (printf %s "$req_header"; printf %s "$body") | nc -w 15 "$HOST" "$PORT" || true)
+  printf %s "$resp" | awk 'BEGIN{h=1} h&&/^\r?$/{h=0;next} !h{print}'
+}
+
 pull_next() {
-  curl -sf "http://$HOST:$PORT/next?fmt=b64" || true
+  http_get "/next?fmt=b64" || true
 }
 
 post_result() {
   id="$1"; code="$2"; out="$3"; err="$4"
   out_b64=$(printf "%s" "$out" | base64 | tr -d '\n')
   err_b64=$(printf "%s" "$err" | base64 | tr -d '\n')
-  curl -sf -X POST "http://$HOST:$PORT/result" \
-    -d "id=$id" -d "code=$code" -d "out_b64=$out_b64" -d "err_b64=$err_b64" >/dev/null || true
+  body="id=${id}&code=${code}&out_b64=${out_b64}&err_b64=${err_b64}"
+  http_post_form "/result" "$body" >/dev/null || true
 }
 
 echo "Starting agent loop against http://$HOST:$PORT/next"
@@ -171,4 +216,5 @@ echo "FreeBSD orchestrator agent installed successfully!"
 echo "Installed /usr/local/bin/ask and /usr/local/bin/agent-loop"
 echo "Service can be managed with: service agent_loop start/stop/status"
 echo "Enable on boot with: sysrc agent_loop_enable=YES"
+
 
