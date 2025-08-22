@@ -197,8 +197,9 @@ if command -v sysrc >/dev/null 2>&1; then
 
 name=agent_loop
 rcvar=agent_loop_enable
-command=/usr/local/bin/agent-loop
+command=/usr/sbin/daemon
 pidfile=/var/run/${name}.pid
+command_args="-f -p ${pidfile} /usr/local/bin/agent-loop"
 
 load_rc_config $name
 : ${agent_loop_enable:=NO}
@@ -216,5 +217,3 @@ echo "FreeBSD orchestrator agent installed successfully!"
 echo "Installed /usr/local/bin/ask and /usr/local/bin/agent-loop"
 echo "Service can be managed with: service agent_loop start/stop/status"
 echo "Enable on boot with: sysrc agent_loop_enable=YES"
-
-
